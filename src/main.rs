@@ -46,6 +46,9 @@ fn main() {
     let timer_service = EspTimerService::new().unwrap();
 
     esp_idf_svc::hal::task::block_on(async {
+        let mut third_timer = timer_service.timer_async().unwrap();
+        i2c_test(&mut third_timer).await.unwrap();
+        /*
         let _wifi = create_wifi().unwrap();
         info!("Wifi created");
 
@@ -53,8 +56,8 @@ fn main() {
         info!("MQTT client created");
 
         run(&mut client, &mut conn, timer_service).await
+         */
     })
-    .unwrap();
 }
 
 async fn run(
