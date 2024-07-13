@@ -29,21 +29,18 @@ lazy_static! {
 }
 
 pub struct I2CDevices<'a> {
-    pub power_ina_219: INA219<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
-    pub solar_ina_219: INA219<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
-    pub tpl_potentiometer: TPLPotentiometer<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
+    pub power_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+    pub solar_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+    pub tpl_potentiometer: TPLPotentiometer<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
 }
 
 impl<'a> I2CDevices<'a> {
     pub fn new(shared_bus: &'a BusManager<NullMutex<I2cDriver<'a>>>) -> Result<Self> {
         println!("Setting up I2C bus.");
 
-        let mut power_ina_219: INA219<I2cProxy<std::sync::Mutex<I2cDriver>>> =
-            INA219::new(shared_bus.acquire_i2c(), POWER_INA_219_ADDRESS);
-        let mut solar_ina_219: INA219<I2cProxy<std::sync::Mutex<I2cDriver>>> =
-            INA219::new(shared_bus.acquire_i2c(), SOLAR_INA_219_ADDRESS);
-        let tpl_potentiometer: TPLPotentiometer<I2cProxy<std::sync::Mutex<I2cDriver>>> =
-            TPLPotentiometer::new(shared_bus.acquire_i2c(), TPL_ADDRESS);
+        let mut power_ina_219 = INA219::new(shared_bus.acquire_i2c(), POWER_INA_219_ADDRESS);
+        let mut solar_ina_219 = INA219::new(shared_bus.acquire_i2c(), SOLAR_INA_219_ADDRESS);
+        let tpl_potentiometer = TPLPotentiometer::new(shared_bus.acquire_i2c(), TPL_ADDRESS);
 
         power_ina_219.calibrate(6711)?;
         solar_ina_219.calibrate(6711)?;
@@ -82,4 +79,15 @@ fn build_ina_stats(ina_219: &mut INA219<I2cProxy<NullMutex<I2cDriver>>>) -> Resu
         current: *CURRENT_LSB * (ina_219.current()? as f32),
         bus_voltage: ina_219.voltage()?,
     })
+}
+
+pub fn i2c_master_init<'d>(
+    i2c: impl Peripheral<P = impl I2c> + 'd,
+    sda: AnyIOPin,
+    scl: AnyIOPin,
+    baudrate: Hertz,
+) -> anyhow::Result<I2cDriver<'d>> {
+    let config = I2cConfig::new().baudrate(baudrate);
+    let driver = I2cDriver::new(i2c, sda, scl, &config)?;
+    Ok(driver)
 }

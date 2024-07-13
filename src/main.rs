@@ -8,7 +8,7 @@ use core::time::Duration;
 use esp_idf_svc::hal::i2c::I2cDriver;
 use event_service::handle_event;
 use handle_event_implementation::handle_event_implementation;
-use i2c::{create_i2c_master, I2CDevices};
+use i2c::i2c_master_init;
 use std::sync::{Arc, Mutex, RwLock};
 
 use car::Car;
@@ -17,7 +17,7 @@ use context::Context;
 use embassy_futures::select::{select, select3, Either, Either3};
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::hal::peripherals::Peripherals;
+use esp_idf_svc::hal::peripherals::{self, Peripherals};
 use esp_idf_svc::mqtt::client::*;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::EspError;
@@ -48,7 +48,16 @@ fn main() -> Result<()> {
 
     let timer_service = EspTimerService::new()?;
 
-    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master)?;
+    let peripherals = Peripherals::take()?;
+
+    let mut i2c_master = i2c_master_init(
+        peripherals.i2c0,
+        peripherals.pins.gpio21.into(),
+        peripherals.pins.gpio22.into(),
+        100000.into(),
+    )?;
+
+    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
 
     esp_idf_svc::hal::task::block_on(async {
         let mut third_timer = timer_service.timer_async().unwrap();
@@ -98,7 +107,6 @@ async fn run(
         // Note also that if you go to http://tools.emqx.io/ and then connect and send a message to topic
         // "esp-mqtt-demo", the client configured here should receive it.
         pin!(async move {
-            loop {}
             info!("MQTT Listening for messages");
 
             while let Ok(event) = connection.next().await {
@@ -110,7 +118,6 @@ async fn run(
             Ok(())
         }),
         pin!(async move {
-            loop {}
             // Using `pin!` is optional, but it optimizes the memory size of the Futures
             for topic in topics {
                 while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
