@@ -27,7 +27,7 @@ impl Car {
         current_charge_wh: u32,
         max_charging_speed_w: u32,
     ) -> Result<Self> {
-        if (current_charge_wh > charging_capacity_wh) {
+        if current_charge_wh > charging_capacity_wh {
             Err(Error::new(
                 ErrorKind::InvalidInput,
                 "Current charge cannot exceed charging capacity",
@@ -46,7 +46,7 @@ impl Car {
     }
 
     pub fn change_current_charge(&mut self, new_charge_wh: u32) -> Result<()> {
-        if (new_charge_wh > self.charging_capacity_wh) {
+        if new_charge_wh > self.charging_capacity_wh {
             Err(Error::new(
                 ErrorKind::InvalidInput,
                 "New charge cannot exceed charging capacity",

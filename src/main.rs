@@ -8,16 +8,16 @@ use core::time::Duration;
 use esp_idf_svc::hal::i2c::I2cDriver;
 use event_service::handle_event;
 use handle_event_implementation::handle_event_implementation;
-use i2c::i2c_master_init;
+use i2c::{i2c_master_init, I2CDevices};
 use std::sync::{Arc, Mutex, RwLock};
 
 use car::Car;
 use charging_controller::ChargingController;
 use context::Context;
-use embassy_futures::select::{select, select3, Either, Either3};
+use embassy_futures::select::{select3, Either3};
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::hal::peripherals::{self, Peripherals};
+use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::mqtt::client::*;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::EspError;
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
 
     let peripherals = Peripherals::take()?;
 
-    let mut i2c_master = i2c_master_init(
+    let i2c_master = i2c_master_init(
         peripherals.i2c0,
         peripherals.pins.gpio21.into(),
         peripherals.pins.gpio22.into(),
@@ -60,23 +60,39 @@ fn main() -> Result<()> {
     let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
 
     esp_idf_svc::hal::task::block_on(async {
-        let mut third_timer = timer_service.timer_async().unwrap();
+        let mut timer = timer_service.timer_async().unwrap();
 
-        /*
+        let mut i2c_devices = I2CDevices::new(&shared_bus.acquire_i2c()).unwrap();
+
         let _wifi = create_wifi().unwrap();
         info!("Wifi created");
 
-        let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
+        let (mut client, conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID).unwrap();
         info!("MQTT client created");
 
-        run(&mut client, &mut conn, timer_service).await
-         */
+        for topic in ["/wall-plug/stats", "/solar-panel/stats"] {
+            while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
+                error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
+
+                // Re-try in 0.5s
+                timer.after(Duration::from_millis(500)).await.unwrap();
+
+                continue;
+            }
+        }
+
+        i2c_devices
+            .write_mqtt_messages(&mut timer, &mut client)
+            .await
+            .unwrap();
+
+        //run(&mut client, &mut conn, timer_service).await
     });
     Ok(())
 }
 
 async fn run(
-    client: &mut EspAsyncMqttClient,
+    mqtt_client: &mut EspAsyncMqttClient,
     connection: &mut EspAsyncMqttConnection,
     timer_service: EspTimerService<Task>,
 ) -> Result<()> {
@@ -96,7 +112,7 @@ async fn run(
 
     let mut first_timer = timer_service.timer_async()?;
     let mut second_timer = timer_service.timer_async()?;
-    let mut third_timer = timer_service.timer_async()?;
+    let third_timer = timer_service.timer_async()?;
 
     let res = select3(
         // Need to immediately start pumping the connection for messages, or else subscribe() and publish() below will not work
@@ -120,7 +136,7 @@ async fn run(
         pin!(async move {
             // Using `pin!` is optional, but it optimizes the memory size of the Futures
             for topic in topics {
-                while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
+                while let Err(e) = mqtt_client.subscribe(topic, QoS::AtMostOnce).await {
                     error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
 
                     // Re-try in 0.5s
@@ -135,7 +151,7 @@ async fn run(
 
             let payload = "Hello from esp-mqtt-demo!";
 
-            client
+            mqtt_client
                 .publish(
                     "/charging-controller/start-charging",
                     QoS::AtMostOnce,
