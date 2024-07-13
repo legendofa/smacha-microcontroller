@@ -1,6 +1,7 @@
+use std::fmt::Display;
 use std::time::Duration;
 
-use esp_idf_svc::hal::delay::BLOCK;
+use embedded_hal::blocking::i2c::Write;
 use esp_idf_svc::hal::gpio::AnyIOPin;
 use esp_idf_svc::hal::i2c::{I2c, I2cConfig, I2cDriver};
 use esp_idf_svc::hal::peripheral::Peripheral;
@@ -11,45 +12,90 @@ use esp_idf_svc::hal::units::Hertz;
 use anyhow::Result;
 use esp_idf_svc::timer::EspAsyncTimer;
 use ina219::INA219;
+use lazy_static::lazy_static;
 use log::info;
+use shared_bus::{BusManager, BusManagerSimple, I2cProxy, NullMutex};
 
-const INA_219_ADDRESS: u8 = 0x42;
+use crate::tpl_potentiometer::TPLPotentiometer;
+
+const POWER_INA_219_ADDRESS: u8 = 0x42;
+const SOLAR_INA_219_ADDRESS: u8 = 0x40;
 const TPL_ADDRESS: u8 = 0x2E;
+const INA_219_MAX_EXPECTED_CURRENT: f32 = 2.0;
+const INA_219_POWER_FACTOR: i16 = 20;
 
-fn i2c_master_init<'d>(
-    i2c: impl Peripheral<P = impl I2c> + 'd,
-    sda: AnyIOPin,
-    scl: AnyIOPin,
-    baudrate: Hertz,
-) -> anyhow::Result<I2cDriver<'d>> {
-    let config = I2cConfig::new().baudrate(baudrate);
-    let driver = I2cDriver::new(i2c, sda, scl, &config)?;
-    Ok(driver)
+lazy_static! {
+    static ref CURRENT_LSB: f32 = INA_219_MAX_EXPECTED_CURRENT / (2.0_f32.powf(15.0));
 }
 
-pub async fn i2c_test(esp_async_timer: &mut EspAsyncTimer) -> Result<()> {
-    println!("Starting I2C self test");
+pub struct I2CDevices<'a> {
+    pub power_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+    pub solar_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+    pub tpl_potentiometer: TPLPotentiometer<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+}
+
+impl<'a> I2CDevices<'a> {
+    pub fn new(shared_bus: &'a BusManager<NullMutex<I2cDriver<'a>>>) -> Result<Self> {
+        let i2c_proxy_1: I2cProxy<NullMutex<I2cDriver<'a>>> = shared_bus.acquire_i2c();
+        let i2c_proxy_2 = i2c_proxy_1.clone();
+        let i2c_proxy_3 = i2c_proxy_1.clone();
+
+        let mut power_ina_219 = INA219::new(i2c_proxy_1, POWER_INA_219_ADDRESS);
+        let mut solar_ina_219 = INA219::new(i2c_proxy_2, SOLAR_INA_219_ADDRESS);
+        let tpl_potentiometer = TPLPotentiometer::new(i2c_proxy_3, TPL_ADDRESS);
+
+        power_ina_219.calibrate(6711)?;
+        solar_ina_219.calibrate(6711)?;
+
+        let i2c_devices = Self {
+            power_ina_219,
+            solar_ina_219,
+            tpl_potentiometer,
+        };
+        Ok(i2c_devices)
+    }
+
+    pub async fn write_mqtt_messages(&mut self, esp_async_timer: &mut EspAsyncTimer) -> Result<()> {
+        loop {
+            info!("--- POWER INA MQTT ---");
+            let power_ina_stats = build_ina_stats(&mut self.power_ina_219);
+            info!("--- SOLAR INA ---");
+            let solar_ina_stats = build_ina_stats(&mut self.solar_ina_219);
+            esp_async_timer.after(Duration::from_millis(500)).await?;
+        }
+    }
+}
+
+pub fn create_shared_bus<'a>() -> Result<BusManager<NullMutex<I2cDriver<'a>>>> {
+    println!("Setting up I2C bus.");
 
     let peripherals = Peripherals::take()?;
 
-    let mut i2c_master = i2c_master_init(
+    let config = I2cConfig::new().baudrate(Into::<Hertz>::into(100.kHz()));
+    let i2c_master = I2cDriver::new(
         peripherals.i2c0,
-        peripherals.pins.gpio21.into(),
-        peripherals.pins.gpio22.into(),
-        100.kHz().into(),
+        Into::<AnyIOPin>::into(peripherals.pins.gpio21),
+        Into::<AnyIOPin>::into(peripherals.pins.gpio22),
+        &config,
     )?;
 
-    i2c_master.write(TPL_ADDRESS, &[0x7F], BLOCK)?;
+    let shared_bus: BusManager<NullMutex<I2cDriver>> = BusManagerSimple::new(i2c_master);
+    Ok(shared_bus)
+}
 
-    let mut ina_219 = INA219::new(i2c_master, INA_219_ADDRESS);
+#[derive(Debug)]
+pub struct INA219Stats {
+    shunt_voltage: i16,
+    power: i16,
+    current: f32,
+    bus_voltage: u16,
+}
 
-    ina_219.calibrate(6711)?;
-    loop {
-        info!("Shunt voltage: {}uV", 10 * ina_219.shunt_voltage()?);
-        info!("Power: {}", ina_219.power()?);
-        info!("Current: {}", 0.00006103 * (ina_219.current()? as f32));
-        info!("Bus voltage: {}", ina_219.voltage()?);
-        esp_async_timer.after(Duration::from_millis(500)).await?;
-    }
-    Ok(())
+fn build_ina_stats(ina_219: &mut INA219<I2cProxy<NullMutex<I2cDriver>>>) -> Result<INA219Stats> {
+    Ok(INA219Stats {
+        shunt_voltage: 10 * ina_219.shunt_voltage()?,
+        power: INA_219_POWER_FACTOR * ina_219.power()?,
+        current: *CURRENT_LSB * (ina_219.current()? as f32),
+        bus_voltage: ina_219.voltage()?,
+    })
 }

@@ -1,12 +1,13 @@
 //! MQTT blocking client example which subscribes to an internet MQTT server and then sends
 //! and receives events in its own topic.
+#![feature(const_fn_floating_point_arithmetic)]
 
 use anyhow::Result;
 use core::pin::pin;
 use core::time::Duration;
 use event_service::handle_event;
 use handle_event_implementation::handle_event_implementation;
-use i2c::i2c_test;
+use i2c::{create_shared_bus, I2CDevices};
 use std::sync::{Arc, Mutex, RwLock};
 
 use car::Car;
@@ -29,6 +30,7 @@ mod event_service;
 mod handle_event_implementation;
 mod handler_functions;
 mod i2c;
+mod tpl_potentiometer;
 
 use log::*;
 const CHANNEL: u8 = 11;
@@ -39,15 +41,18 @@ const PASSWORD: &str = "thisismyhotspot1234";
 const MQTT_URL: &str = "mqtt://192.168.71.2:1883";
 const MQTT_CLIENT_ID: &str = "esp-mqtt";
 
-fn main() {
+fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    let timer_service = EspTimerService::new().unwrap();
+    let timer_service = EspTimerService::new()?;
+
+    let shared_bus = create_shared_bus()?;
+    let i2c_devices = I2CDevices::new(&shared_bus)?;
 
     esp_idf_svc::hal::task::block_on(async {
         let mut third_timer = timer_service.timer_async().unwrap();
-        i2c_test(&mut third_timer).await.unwrap();
+
         /*
         let _wifi = create_wifi().unwrap();
         info!("Wifi created");
@@ -57,7 +62,8 @@ fn main() {
 
         run(&mut client, &mut conn, timer_service).await
          */
-    })
+    });
+    Ok(())
 }
 
 async fn run(
@@ -139,10 +145,7 @@ async fn run(
             second_timer.after(Duration::from_secs(sleep_secs)).await?;
             Ok(())
         }),
-        pin!(async move {
-            i2c_test(&mut third_timer).await?;
-            Ok(())
-        }),
+        pin!(async move { Ok(()) }),
     )
     .await;
 
