@@ -5,9 +5,10 @@
 use anyhow::Result;
 use core::pin::pin;
 use core::time::Duration;
+use esp_idf_svc::hal::i2c::I2cDriver;
 use event_service::handle_event;
 use handle_event_implementation::handle_event_implementation;
-use i2c::{create_shared_bus, I2CDevices};
+use i2c::{create_i2c_master, I2CDevices};
 use std::sync::{Arc, Mutex, RwLock};
 
 use car::Car;
@@ -47,8 +48,7 @@ fn main() -> Result<()> {
 
     let timer_service = EspTimerService::new()?;
 
-    let shared_bus = create_shared_bus()?;
-    let i2c_devices = I2CDevices::new(&shared_bus)?;
+    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master)?;
 
     esp_idf_svc::hal::task::block_on(async {
         let mut third_timer = timer_service.timer_async().unwrap();

@@ -29,20 +29,21 @@ lazy_static! {
 }
 
 pub struct I2CDevices<'a> {
-    pub power_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
-    pub solar_ina_219: INA219<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
-    pub tpl_potentiometer: TPLPotentiometer<I2cProxy<'a, NullMutex<I2cDriver<'a>>>>,
+    pub power_ina_219: INA219<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
+    pub solar_ina_219: INA219<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
+    pub tpl_potentiometer: TPLPotentiometer<I2cProxy<'a, std::sync::Mutex<I2cDriver<'a>>>>,
 }
 
 impl<'a> I2CDevices<'a> {
     pub fn new(shared_bus: &'a BusManager<NullMutex<I2cDriver<'a>>>) -> Result<Self> {
-        let i2c_proxy_1: I2cProxy<NullMutex<I2cDriver<'a>>> = shared_bus.acquire_i2c();
-        let i2c_proxy_2 = i2c_proxy_1.clone();
-        let i2c_proxy_3 = i2c_proxy_1.clone();
+        println!("Setting up I2C bus.");
 
-        let mut power_ina_219 = INA219::new(i2c_proxy_1, POWER_INA_219_ADDRESS);
-        let mut solar_ina_219 = INA219::new(i2c_proxy_2, SOLAR_INA_219_ADDRESS);
-        let tpl_potentiometer = TPLPotentiometer::new(i2c_proxy_3, TPL_ADDRESS);
+        let mut power_ina_219: INA219<I2cProxy<std::sync::Mutex<I2cDriver>>> =
+            INA219::new(shared_bus.acquire_i2c(), POWER_INA_219_ADDRESS);
+        let mut solar_ina_219: INA219<I2cProxy<std::sync::Mutex<I2cDriver>>> =
+            INA219::new(shared_bus.acquire_i2c(), SOLAR_INA_219_ADDRESS);
+        let tpl_potentiometer: TPLPotentiometer<I2cProxy<std::sync::Mutex<I2cDriver>>> =
+            TPLPotentiometer::new(shared_bus.acquire_i2c(), TPL_ADDRESS);
 
         power_ina_219.calibrate(6711)?;
         solar_ina_219.calibrate(6711)?;
@@ -64,23 +65,6 @@ impl<'a> I2CDevices<'a> {
             esp_async_timer.after(Duration::from_millis(500)).await?;
         }
     }
-}
-
-pub fn create_shared_bus<'a>() -> Result<BusManager<NullMutex<I2cDriver<'a>>>> {
-    println!("Setting up I2C bus.");
-
-    let peripherals = Peripherals::take()?;
-
-    let config = I2cConfig::new().baudrate(Into::<Hertz>::into(100.kHz()));
-    let i2c_master = I2cDriver::new(
-        peripherals.i2c0,
-        Into::<AnyIOPin>::into(peripherals.pins.gpio21),
-        Into::<AnyIOPin>::into(peripherals.pins.gpio22),
-        &config,
-    )?;
-
-    let shared_bus: BusManager<NullMutex<I2cDriver>> = BusManagerSimple::new(i2c_master);
-    Ok(shared_bus)
 }
 
 #[derive(Debug)]
