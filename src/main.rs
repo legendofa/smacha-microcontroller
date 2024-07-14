@@ -3,10 +3,13 @@
 
 use core::pin::pin;
 use core::time::Duration;
+use std::env;
 use std::sync::{Arc, Mutex, RwLock};
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::hal::i2c::I2cDriver;
+use esp_idf_svc::hal::modem::Modem;
+use esp_idf_svc::hal::peripheral::{Peripheral, PeripheralRef};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::mqtt::client::*;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
@@ -17,8 +20,7 @@ use esp_idf_svc::wifi::*;
 use anyhow::Result;
 use embassy_futures::select::{select, Either};
 use event_service::handle_event;
-use hardware_controller::HardwareController;
-use i2c::{i2c_master_init, I2CDevices};
+use i2c::i2c_master_init;
 use log::*;
 
 mod car;
@@ -51,26 +53,33 @@ const TOPICS: [&str; 4] = [
 ];
 
 fn main() {
+    if let Err(e) = run_main() {
+        eprintln!("Application error: {:?}", e);
+    }
+}
+
+fn run_main() -> Result<()> {
     {
+        env::set_var("RUST_BACKTRACE", "1");
         esp_idf_svc::sys::link_patches();
         esp_idf_svc::log::EspLogger::initialize_default();
 
-        let timer_service = EspTimerService::new().unwrap();
+        let timer_service = EspTimerService::new()?;
 
-        let peripherals = Peripherals::take().unwrap();
+        let peripherals = Peripherals::take()?;
 
         let i2c_master = i2c_master_init(
-            peripherals.i2c0,
+            peripherals.i2c0.into_ref(),
             peripherals.pins.gpio21.into(),
             peripherals.pins.gpio22.into(),
             100000.into(),
-        )
-        .unwrap();
+        )?;
 
-        let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
+        let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master)
+            .expect("Shared bus could not be initialized");
 
         esp_idf_svc::hal::task::block_on(async {
-            let _wifi = wifi_create()?;
+            let _wifi = wifi_create(peripherals.modem.into_ref())?;
             info!("Wifi created");
 
             let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
@@ -85,7 +94,6 @@ fn main() {
             run(&mut client, &mut conn, &timer_service).await?;
             Ok::<(), anyhow::Error>(())
         })
-        .unwrap()
     }
 }
 
@@ -181,12 +189,11 @@ fn mqtt_create(
     Ok((mqtt_client, mqtt_conn))
 }
 
-fn wifi_create() -> Result<EspWifi<'static>, EspError> {
-    let peripherals = Peripherals::take()?;
+fn wifi_create(modem: PeripheralRef<'static, Modem>) -> Result<EspWifi, EspError> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut esp_wifi = EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?;
+    let mut esp_wifi = EspWifi::new(modem, sys_loop.clone(), Some(nvs))?;
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop)?;
 
     let wifi_configuration = Configuration::AccessPoint(AccessPointConfiguration {
