@@ -67,7 +67,7 @@ fn main() -> Result<()> {
         let _wifi = create_wifi().unwrap();
         info!("Wifi created");
 
-        let (mut client, conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID).unwrap();
+        /* let (mut client, conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID).unwrap();
         info!("MQTT client created");
 
         for topic in ["/wall-plug/stats", "/solar-panel/stats"] {
@@ -84,7 +84,9 @@ fn main() -> Result<()> {
         i2c_devices
             .write_mqtt_messages(&mut timer, &mut client)
             .await
-            .unwrap();
+            .unwrap(); */
+
+        async move { loop {} }.await;
 
         //run(&mut client, &mut conn, timer_service).await
     });
@@ -204,7 +206,7 @@ fn create_wifi() -> Result<EspWifi<'static>, EspError> {
 
     let wifi_configuration = Configuration::AccessPoint(AccessPointConfiguration {
         ssid: SSID.try_into().unwrap(),
-        ssid_hidden: true,
+        ssid_hidden: false,
         auth_method: AuthMethod::WPA2Personal,
         password: PASSWORD.try_into().unwrap(),
         channel: CHANNEL,
