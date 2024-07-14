@@ -15,7 +15,7 @@ struct StartTripEventData {
 }
 
 pub async fn handle_start_charging(
-    timer: &mut EspAsyncTimer,
+    _timer: &mut EspAsyncTimer,
     data: &[u8],
     context: Context,
 ) -> Result<()> {
@@ -26,7 +26,7 @@ pub async fn handle_start_charging(
 }
 
 pub async fn handle_change_charging_speed(
-    timer: &mut EspAsyncTimer,
+    _timer: &mut EspAsyncTimer,
     data: &[u8],
     context: Context,
 ) -> Result<()> {
@@ -37,7 +37,7 @@ pub async fn handle_change_charging_speed(
 }
 
 pub async fn handle_stop_charging(
-    timer: &mut EspAsyncTimer,
+    _timer: &mut EspAsyncTimer,
     _data: &[u8],
     context: Context,
 ) -> Result<()> {
@@ -53,5 +53,7 @@ pub async fn handle_start_trip(
 ) -> Result<()> {
     let start_trip_event_data: StartTripEventData = serde_json::from_slice(data)?;
     let mut car = context.car_rwlock.write().unwrap();
+    car.start_trip(timer, start_trip_event_data.energy_usage_w)
+        .await?;
     Ok(())
 }

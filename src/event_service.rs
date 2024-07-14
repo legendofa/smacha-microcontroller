@@ -2,7 +2,6 @@ use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
 use esp_idf_svc::{mqtt::client::EventPayload, sys::EspError, timer::EspAsyncTimer};
-use log::info;
 
 use crate::{context::Context, handle_event_implementation::handle_event_implementation};
 
@@ -27,10 +26,11 @@ pub async fn handle_event<'a>(
             ))?,
         },
         _ => {
-            info!(
+            let message = format!(
                 "Received message: Payload status is not `EventPayload::Received`, instead: {}",
                 event_payload
             );
+            Err(Error::new(ErrorKind::InvalidData, message))?
         }
     };
     Ok(())

@@ -38,7 +38,13 @@ const PASSWORD: &str = "thisismyhotspot1234";
 
 const MQTT_URL: &str = "mqtt://192.168.71.2:1883";
 const MQTT_CLIENT_ID: &str = "esp-mqtt";
-const MQTT_TOPIC: &str = "actuators/relay_board";
+
+const TOPICS: [&str; 4] = [
+    "/charging-controller/start-charging",
+    "/charging-controller/change-charging-speed",
+    "/charging-controller/stop-charging",
+    "/charging-controller/start-trip",
+];
 
 fn main() {
     esp_idf_svc::sys::link_patches();
@@ -69,10 +75,7 @@ async fn run(
     let mut first_timer = timer_service.timer_async()?;
     let mut second_timer = timer_service.timer_async()?;
 
-    let context = Context {
-        charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
-        car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100)?)),
-    };
+    let context = initialize_context()?;
 
     let res = select(
         // Need to immediately start pumping the connection for messages, or else subscribe() and publish() below will not work
@@ -86,7 +89,10 @@ async fn run(
             info!("MQTT Listening for messages");
 
             while let Ok(event) = connection.next().await {
-                handle_event(&mut first_timer, event.payload(), context.clone()).await?;
+                match handle_event(&mut first_timer, event.payload(), context.clone()).await {
+                    Ok(_) => (),
+                    Err(error) => info!("{error}"),
+                }
             }
 
             info!("Connection closed");
@@ -95,25 +101,24 @@ async fn run(
         }),
         pin!(async move {
             // Using `pin!` is optional, but it optimizes the memory size of the Futures
-            loop {
-                if let Err(e) = client.subscribe(MQTT_TOPIC, QoS::AtMostOnce).await {
-                    error!("Failed to subscribe to topic \"{MQTT_TOPIC}\": {e}, retrying...");
+            for topic in TOPICS {
+                while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
+                    error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
 
                     // Re-try in 0.5s
-                    second_timer
-                        .after(Duration::from_millis(500))
-                        .await
-                        .unwrap();
+                    second_timer.after(Duration::from_millis(500)).await?;
 
                     continue;
                 }
+            }
 
+            loop {
                 // Just to give a chance of our connection to get even the first published message
                 second_timer.after(Duration::from_millis(500)).await?;
 
                 let payload = "Hello from esp-mqtt-demo!";
 
-                loop {
+                /* loop {
                     client
                         .publish(MQTT_TOPIC, QoS::AtMostOnce, false, payload.as_bytes())
                         .await?;
@@ -124,7 +129,7 @@ async fn run(
 
                     info!("Now sleeping for {sleep_secs}s...");
                     second_timer.after(Duration::from_secs(sleep_secs)).await?;
-                }
+                } */
             }
         }),
     )
@@ -177,4 +182,16 @@ fn wifi_create() -> Result<EspWifi<'static>, EspError> {
     );
 
     Ok(esp_wifi)
+}
+
+fn initialize_context() -> Result<Context> {
+    let context = Context {
+        charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
+        car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100)?)),
+    };
+    {
+        let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
+        charging_controller.connect_car(context.car_rwlock.clone())?;
+    };
+    Ok(context)
 }

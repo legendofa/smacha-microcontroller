@@ -1,6 +1,7 @@
+use std::io::{Error, ErrorKind};
+
 use anyhow::Result;
 use esp_idf_svc::timer::EspAsyncTimer;
-use log::info;
 
 use crate::{
     context::Context,
@@ -24,8 +25,8 @@ pub async fn handle_event_implementation(
         "/charging-controller/stop-charging" => handle_stop_charging(timer, data, context).await,
         "/charging-controller/start-trip" => handle_start_trip(timer, data, context).await,
         _ => {
-            info!("Topic not available");
-            Ok(())
+            let message = format!("Topic: {topic} not available");
+            Err(Error::new(ErrorKind::InvalidData, message))?
         }
     }
 }

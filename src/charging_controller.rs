@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::info;
 use std::{
     io::{Error, ErrorKind},
     sync::{Arc, RwLock},
@@ -25,7 +26,8 @@ impl ChargingController {
     pub fn connect_car(&mut self, car_rwlock: Arc<RwLock<Car>>) -> Result<()> {
         match self {
             ChargingController::Disconnected => {
-                *self = ChargingController::Connected { car_rwlock }
+                *self = ChargingController::Connected { car_rwlock };
+                info!("Car connected");
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -38,7 +40,8 @@ impl ChargingController {
     pub fn disconnect_car(&mut self) -> Result<()> {
         match self {
             ChargingController::Connected { car_rwlock: _ } => {
-                *self = ChargingController::Disconnected
+                *self = ChargingController::Disconnected;
+                info!("Car disconnected");
             }
             ChargingController::Charging { .. } => Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -72,6 +75,7 @@ impl ChargingController {
                     car_rwlock: car_rwlock.clone(),
                     charging_speed_w,
                 };
+                info!("Charging started with charging speed: {charging_speed_w}w");
             }
             ChargingController::Charging { .. } => {
                 Err(Error::new(ErrorKind::InvalidInput, "Already charging"))?
@@ -99,10 +103,14 @@ impl ChargingController {
                         car_rwlock: car_rwlock.clone(),
                         charging_speed_w: new_charging_speed_w,
                     };
+                    info!("Charging speed changed to: {new_charging_speed_w}w");
                 }
                 Ok(())
             }
-            _ => panic!("Not currently charging"),
+            _ => Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Not currently charging",
+            ))?,
         }
     }
 
@@ -111,7 +119,8 @@ impl ChargingController {
             ChargingController::Charging { car_rwlock, .. } => {
                 *self = ChargingController::Connected {
                     car_rwlock: car_rwlock.clone(),
-                }
+                };
+                info!("Charging stopped")
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidInput,
