@@ -11,25 +11,14 @@ use crate::{
     },
 };
 
-pub async fn handle_event_implementation(
-    topic: &str,
-    esp_async_timer: &mut EspAsyncTimer,
-    data: &[u8],
-    context: Context,
-) -> Result<()> {
+pub async fn handle_event_implementation(topic: &str, data: &[u8], context: Context) -> Result<()> {
     match topic {
-        "/charging-controller/start-charging" => {
-            handle_start_charging(esp_async_timer, data, context).await
-        }
+        "/charging-controller/start-charging" => handle_start_charging(data, context).await,
         "/charging-controller/change-charging-speed" => {
-            handle_change_charging_speed(esp_async_timer, data, context).await
+            handle_change_charging_speed(data, context).await
         }
-        "/charging-controller/stop-charging" => {
-            handle_stop_charging(esp_async_timer, data, context).await
-        }
-        "/charging-controller/start-trip" => {
-            handle_start_trip(esp_async_timer, data, context).await
-        }
+        "/charging-controller/stop-charging" => handle_stop_charging(data, context).await,
+        "/charging-controller/start-trip" => handle_start_trip(data, context).await,
         _ => Err(Error::new(ErrorKind::InvalidData, "Topic not available"))?,
     }
 }

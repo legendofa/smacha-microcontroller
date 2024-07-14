@@ -1,28 +1,14 @@
-//! MQTT blocking client example which subscribes to an internet MQTT server and then sends
+//! MQTT asynchronous client example which subscribes to an internet MQTT server and then sends
 //! and receives events in its own topic.
-#![feature(const_fn_floating_point_arithmetic)]
 
-use anyhow::Result;
 use core::pin::pin;
 use core::time::Duration;
-use esp_idf_svc::hal::i2c::I2cDriver;
-use event_service::handle_event;
-use handle_event_implementation::handle_event_implementation;
-use i2c::{i2c_master_init, I2CDevices};
 use std::sync::{Arc, Mutex, RwLock};
 
 use car::Car;
 use charging_controller::ChargingController;
 use context::Context;
-use embassy_futures::select::{select3, Either3};
-
-use esp_idf_svc::eventloop::EspSystemEventLoop;
-use esp_idf_svc::hal::peripherals::Peripherals;
-use esp_idf_svc::mqtt::client::*;
-use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use esp_idf_svc::sys::EspError;
-use esp_idf_svc::timer::{EspTimerService, Task};
-use esp_idf_svc::wifi::*;
+use embassy_futures::select::{select, Either};
 
 mod car;
 mod charging_controller;
@@ -33,7 +19,18 @@ mod handler_functions;
 mod i2c;
 mod tpl_potentiometer;
 
+use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::peripherals::Peripherals;
+use esp_idf_svc::mqtt::client::*;
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
+use esp_idf_svc::sys::EspError;
+use esp_idf_svc::timer::{EspTimerService, Task};
+use esp_idf_svc::wifi::*;
+
+use anyhow::Result;
+use event_service::handle_event;
 use log::*;
+
 const CHANNEL: u8 = 11;
 
 const SSID: &str = "esp-wifi-access-point";
@@ -41,82 +38,56 @@ const PASSWORD: &str = "thisismyhotspot1234";
 
 const MQTT_URL: &str = "mqtt://192.168.71.2:1883";
 const MQTT_CLIENT_ID: &str = "esp-mqtt";
+const MQTT_TOPIC: &str = "actuators/relay_board";
 
-fn main() -> Result<()> {
+fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    let timer_service = EspTimerService::new()?;
+    let timer_service = EspTimerService::new().unwrap();
 
-    let peripherals = Peripherals::take()?;
+    let context = Context {
+        charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
+        car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100).unwrap())),
+    };
 
-    let i2c_master = i2c_master_init(
-        peripherals.i2c0,
-        peripherals.pins.gpio21.into(),
-        peripherals.pins.gpio22.into(),
-        100000.into(),
-    )?;
-
-    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
+    let event_payload = EventPayload::Received {
+        id: 1,
+        topic: Some("test"),
+        data: &[0x00],
+        details: Details::Complete,
+    };
 
     esp_idf_svc::hal::task::block_on(async {
-        let mut timer = timer_service.timer_async().unwrap();
-
-        let mut i2c_devices = I2CDevices::new(&shared_bus.acquire_i2c()).unwrap();
-
-        let _wifi = create_wifi().unwrap();
+        handle_event(event_payload, context.clone()).await?;
+        /* let _wifi = wifi_create()?;
         info!("Wifi created");
 
-        /* let (mut client, conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID).unwrap();
+        let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
         info!("MQTT client created");
 
-        for topic in ["/wall-plug/stats", "/solar-panel/stats"] {
-            while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
-                error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
-
-                // Re-try in 0.5s
-                timer.after(Duration::from_millis(500)).await.unwrap();
-
-                continue;
-            }
-        }
-
-        i2c_devices
-            .write_mqtt_messages(&mut timer, &mut client)
-            .await
-            .unwrap(); */
-
-        async move { loop {} }.await;
-
-        //run(&mut client, &mut conn, timer_service).await
-    });
-    Ok(())
+        run(&mut client, &mut conn, &timer_service).await */
+        Ok::<(), anyhow::Error>(())
+    })
+    .unwrap();
 }
 
 async fn run(
-    mqtt_client: &mut EspAsyncMqttClient,
+    client: &mut EspAsyncMqttClient,
     connection: &mut EspAsyncMqttConnection,
-    timer_service: EspTimerService<Task>,
+    timer_service: &EspTimerService<Task>,
 ) -> Result<()> {
     info!("About to start the MQTT client");
+
+    let mut first_timer = timer_service.timer_async()?;
+    let mut second_timer = timer_service.timer_async()?;
 
     let context = Context {
         charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
         car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100)?)),
     };
 
-    let topics: Vec<&str> = vec![
-        "/charging-controller/start-charging",
-        "/charging-controller/change-charging-speed",
-        "/charging-controller/stop-charging",
-        "/charging-controller/start-trip",
-    ];
-
-    let mut first_timer = timer_service.timer_async()?;
-    let mut second_timer = timer_service.timer_async()?;
-    let third_timer = timer_service.timer_async()?;
-
-    let res = select3(
+    let res = select(
         // Need to immediately start pumping the connection for messages, or else subscribe() and publish() below will not work
         // Note that when using the alternative structure and the alternative constructor - `EspMqttClient::new_cb` - you don't need to
         // spawn a new thread, as the messages will be pumped with a backpressure into the callback you provide.
@@ -128,7 +99,7 @@ async fn run(
             info!("MQTT Listening for messages");
 
             while let Ok(event) = connection.next().await {
-                handle_event(&mut first_timer, event.payload(), context.clone()).await?;
+                handle_event(event.payload(), context.clone()).await?;
             }
 
             info!("Connection closed");
@@ -137,47 +108,44 @@ async fn run(
         }),
         pin!(async move {
             // Using `pin!` is optional, but it optimizes the memory size of the Futures
-            for topic in topics {
-                while let Err(e) = mqtt_client.subscribe(topic, QoS::AtMostOnce).await {
-                    error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
+            loop {
+                if let Err(e) = client.subscribe(MQTT_TOPIC, QoS::AtMostOnce).await {
+                    error!("Failed to subscribe to topic \"{MQTT_TOPIC}\": {e}, retrying...");
 
                     // Re-try in 0.5s
-                    second_timer.after(Duration::from_millis(500)).await?;
+                    second_timer
+                        .after(Duration::from_millis(500))
+                        .await
+                        .unwrap();
 
                     continue;
                 }
+
+                // Just to give a chance of our connection to get even the first published message
+                second_timer.after(Duration::from_millis(500)).await?;
+
+                let payload = "Hello from esp-mqtt-demo!";
+
+                loop {
+                    client
+                        .publish(MQTT_TOPIC, QoS::AtMostOnce, false, payload.as_bytes())
+                        .await?;
+
+                    info!("Published \"{payload}\" to topic");
+
+                    let sleep_secs = 2;
+
+                    info!("Now sleeping for {sleep_secs}s...");
+                    second_timer.after(Duration::from_secs(sleep_secs)).await?;
+                }
             }
-
-            // Just to give a chance of our connection to get even the first published message
-            second_timer.after(Duration::from_millis(500)).await?;
-
-            let payload = "Hello from esp-mqtt-demo!";
-
-            mqtt_client
-                .publish(
-                    "/charging-controller/start-charging",
-                    QoS::AtMostOnce,
-                    false,
-                    payload.as_bytes(),
-                )
-                .await?;
-
-            info!("Published \"{payload}\" to topic");
-
-            let sleep_secs = 2;
-
-            info!("Now sleeping for {sleep_secs}s...");
-            second_timer.after(Duration::from_secs(sleep_secs)).await?;
-            Ok(())
         }),
-        pin!(async move { Ok(()) }),
     )
     .await;
 
     match res {
-        Either3::First(res) => res,
-        Either3::Second(res) => res,
-        Either3::Third(res) => res,
+        Either::First(res) => res,
+        Either::Second(res) => res,
     }
 }
 
@@ -196,7 +164,7 @@ fn mqtt_create(
     Ok((mqtt_client, mqtt_conn))
 }
 
-fn create_wifi() -> Result<EspWifi<'static>, EspError> {
+fn wifi_create() -> Result<EspWifi<'static>, EspError> {
     let peripherals = Peripherals::take()?;
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
