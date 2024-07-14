@@ -1,6 +1,6 @@
 use embedded_hal::blocking::i2c;
 use log::error;
-
+#[derive(Clone)]
 pub struct TPLPotentiometer<I2C> {
     i2c: I2C,
     address: u8,

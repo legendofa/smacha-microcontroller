@@ -8,7 +8,7 @@ use crate::{context::Context, handle_event_implementation::handle_event_implemen
 pub async fn handle_event<'a>(
     timer: &mut EspAsyncTimer,
     event_payload: EventPayload<'a, EspError>,
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     match event_payload {
         EventPayload::Received {

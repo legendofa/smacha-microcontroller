@@ -11,11 +11,11 @@ use crate::{
     },
 };
 
-pub async fn handle_event_implementation(
+pub async fn handle_event_implementation<'a>(
     timer: &mut EspAsyncTimer,
     topic: &str,
     data: &[u8],
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     match topic {
         "/charging-controller/start-charging" => handle_start_charging(timer, data, context).await,

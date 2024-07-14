@@ -14,10 +14,10 @@ struct StartTripEventData {
     energy_usage_w: u32,
 }
 
-pub async fn handle_start_charging(
+pub async fn handle_start_charging<'a>(
     _timer: &mut EspAsyncTimer,
     data: &[u8],
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     let charging_event_data: ChargingEventData = serde_json::from_slice(data)?;
     let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
@@ -25,10 +25,10 @@ pub async fn handle_start_charging(
     Ok(())
 }
 
-pub async fn handle_change_charging_speed(
+pub async fn handle_change_charging_speed<'a>(
     _timer: &mut EspAsyncTimer,
     data: &[u8],
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     let charging_event_data: ChargingEventData = serde_json::from_slice(data)?;
     let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
@@ -36,24 +36,26 @@ pub async fn handle_change_charging_speed(
     Ok(())
 }
 
-pub async fn handle_stop_charging(
+pub async fn handle_stop_charging<'a>(
     _timer: &mut EspAsyncTimer,
     _data: &[u8],
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
     charging_controller.stop_charging()?;
     Ok(())
 }
 
-pub async fn handle_start_trip(
+pub async fn handle_start_trip<'a>(
     timer: &mut EspAsyncTimer,
     data: &[u8],
-    context: Context,
+    context: Context<'a>,
 ) -> Result<()> {
     let start_trip_event_data: StartTripEventData = serde_json::from_slice(data)?;
-    let mut car = context.car_rwlock.write().unwrap();
-    car.start_trip(timer, start_trip_event_data.energy_usage_w)
+    /* let &mut hardware_controller = context.hardware_controller;
+    hardware_controller
+        .start_trip(timer, start_trip_event_data.energy_usage_w)
         .await?;
+     */
     Ok(())
 }

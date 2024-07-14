@@ -12,7 +12,6 @@ use log::info;
 
 /// Defines when the battery is counted as full.
 static FULL_CAPACITY_MARGIN: u32 = 10;
-static TIME_IN_SECONDS_PER_WATT: u32 = 100;
 
 #[derive(Clone, Copy)]
 pub struct Car {
@@ -54,23 +53,6 @@ impl Car {
         } else {
             self.current_charge_wh = new_charge_wh;
         }
-        Ok(())
-    }
-
-    pub async fn start_trip(
-        &mut self,
-        esp_async_timer: &mut EspAsyncTimer,
-        energy_usage_w: u32,
-    ) -> Result<()> {
-        let trip_duration = energy_usage_w * TIME_IN_SECONDS_PER_WATT;
-        let peripherals = Peripherals::take()?;
-        let mut trip_pin = PinDriver::output(peripherals.pins.gpio4)?;
-        trip_pin.set_high()?;
-        info!("Motor activated for {}s", trip_duration);
-        esp_async_timer
-            .after(Duration::from_secs(trip_duration as u64))
-            .await?;
-        info!("Motor stopped");
         Ok(())
     }
 }
