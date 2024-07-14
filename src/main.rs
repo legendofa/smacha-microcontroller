@@ -1,7 +1,6 @@
 //! MQTT asynchronous client example which subscribes to an internet MQTT server and then sends
 //! and receives events in its own topic.
 
-use core::pin::pin;
 use core::time::Duration;
 use std::env;
 use std::sync::{Arc, Mutex, RwLock};
@@ -18,7 +17,6 @@ use esp_idf_svc::timer::{EspTimerService, Task};
 use esp_idf_svc::wifi::*;
 
 use anyhow::Result;
-use embassy_futures::select::{select, Either};
 use event_service::handle_event;
 use i2c::i2c_master_init;
 use log::*;
@@ -64,8 +62,6 @@ fn run_main() -> Result<()> {
         esp_idf_svc::sys::link_patches();
         esp_idf_svc::log::EspLogger::initialize_default();
 
-        let timer_service = EspTimerService::new()?;
-
         let peripherals = Peripherals::take()?;
 
         let i2c_master = i2c_master_init(
@@ -91,7 +87,7 @@ fn run_main() -> Result<()> {
             //    tpl_potentiometer: i2c_devices.tpl_potentiometer.clone(),
             //};
 
-            run(&mut client, &mut conn, &timer_service).await?;
+            run(&mut client, &mut conn).await?;
             Ok::<(), anyhow::Error>(())
         })
     }
@@ -100,7 +96,6 @@ fn run_main() -> Result<()> {
 async fn run(
     client: &mut EspMqttClient<'_>,
     connection: &mut EspMqttConnection,
-    timer_service: &EspTimerService<Task>,
     //hardware_controller: HardwareController<'_>,
 ) -> Result<()> {
     std::thread::scope(|s| {
@@ -121,8 +116,7 @@ async fn run(
                 }
 
                 info!("Connection closed");
-            })
-            .unwrap();
+            })?;
 
         // Using `pin!` is optional, but it optimizes the memory size of the Futures
         for topic in TOPICS {

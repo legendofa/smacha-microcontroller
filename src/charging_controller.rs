@@ -58,7 +58,7 @@ impl ChargingController {
         match self {
             ChargingController::Connected { car_rwlock } => {
                 {
-                    let car = car_rwlock.read().unwrap();
+                    let car = car_rwlock.read().expect("Failed read access on car_rwlock");
                     if charging_speed_w > car.max_charging_speed_w {
                         Err(Error::new(
                             ErrorKind::InvalidInput,
@@ -93,7 +93,12 @@ impl ChargingController {
                 car_rwlock,
                 charging_speed_w: _,
             } => {
-                if new_charging_speed_w > car_rwlock.read().unwrap().max_charging_speed_w {
+                if new_charging_speed_w
+                    > car_rwlock
+                        .read()
+                        .expect("Failed read access on car_rwlock")
+                        .max_charging_speed_w
+                {
                     Err(Error::new(
                         ErrorKind::InvalidInput,
                         "Charging speed exceeds car's maximum charging speed",

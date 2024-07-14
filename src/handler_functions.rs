@@ -15,20 +15,29 @@ struct StartTripEventData {
 
 pub fn handle_start_charging(data: &[u8], context: Context) -> Result<()> {
     let charging_event_data: ChargingEventData = serde_json::from_slice(data)?;
-    let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
+    let mut charging_controller = context
+        .charging_controller_mutex
+        .lock()
+        .expect("Failed lock on charging_controller_mutex");
     charging_controller.start_charging(charging_event_data.charging_speed_w)?;
     Ok(())
 }
 
 pub fn handle_change_charging_speed(data: &[u8], context: Context) -> Result<()> {
     let charging_event_data: ChargingEventData = serde_json::from_slice(data)?;
-    let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
+    let mut charging_controller = context
+        .charging_controller_mutex
+        .lock()
+        .expect("Failed lock on charging_controller_mutex");
     charging_controller.change_charging_speed(charging_event_data.charging_speed_w)?;
     Ok(())
 }
 
 pub fn handle_stop_charging(_data: &[u8], context: Context) -> Result<()> {
-    let mut charging_controller = context.charging_controller_mutex.lock().unwrap();
+    let mut charging_controller = context
+        .charging_controller_mutex
+        .lock()
+        .expect("Failed lock on charging_controller_mutex");
     charging_controller.stop_charging()?;
     Ok(())
 }

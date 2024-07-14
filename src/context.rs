@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::{
-    car::Car, charging_controller::ChargingController, hardware_controller::HardwareController,
+    car::Car, charging_controller::ChargingController,
 };
 
 #[derive(Clone)]

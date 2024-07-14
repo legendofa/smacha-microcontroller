@@ -1,7 +1,6 @@
 use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
-use esp_idf_svc::timer::EspAsyncTimer;
 
 use crate::{
     context::Context,

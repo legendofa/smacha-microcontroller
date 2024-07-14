@@ -1,14 +1,8 @@
 use std::{
     io::{Error, ErrorKind},
-    time::Duration,
 };
 
 use anyhow::Result;
-use esp_idf_svc::{
-    hal::{gpio::PinDriver, peripherals::Peripherals},
-    timer::EspAsyncTimer,
-};
-use log::info;
 
 /// Defines when the battery is counted as full.
 static FULL_CAPACITY_MARGIN: u32 = 10;
