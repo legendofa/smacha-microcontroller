@@ -2,10 +2,12 @@ use std::io::{Error, ErrorKind};
 
 use anyhow::Result;
 use esp_idf_svc::{mqtt::client::EventPayload, sys::EspError, timer::EspAsyncTimer};
+use log::info;
 
 use crate::{context::Context, handle_event_implementation::handle_event_implementation};
 
 pub async fn handle_event<'a>(
+    timer: &mut EspAsyncTimer,
     event_payload: EventPayload<'a, EspError>,
     context: Context,
 ) -> Result<()> {
@@ -17,7 +19,7 @@ pub async fn handle_event<'a>(
             details: _,
         } => match topic {
             Some(definitely_topic) => {
-                handle_event_implementation(definitely_topic, data, context).await?
+                handle_event_implementation(timer, definitely_topic, data, context).await?
             }
             None => Err(Error::new(
                 ErrorKind::InvalidData,
@@ -25,11 +27,10 @@ pub async fn handle_event<'a>(
             ))?,
         },
         _ => {
-            let message = format!(
+            info!(
                 "Received message: Payload status is not `EventPayload::Received`, instead: {}",
                 event_payload
             );
-            Err(Error::new(ErrorKind::InvalidData, message))?
         }
     };
     Ok(())

@@ -46,27 +46,14 @@ fn main() {
 
     let timer_service = EspTimerService::new().unwrap();
 
-    let context = Context {
-        charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
-        car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100).unwrap())),
-    };
-
-    let event_payload = EventPayload::Received {
-        id: 1,
-        topic: Some("test"),
-        data: &[0x00],
-        details: Details::Complete,
-    };
-
     esp_idf_svc::hal::task::block_on(async {
-        handle_event(event_payload, context.clone()).await?;
-        /* let _wifi = wifi_create()?;
+        let _wifi = wifi_create()?;
         info!("Wifi created");
 
         let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
         info!("MQTT client created");
 
-        run(&mut client, &mut conn, &timer_service).await */
+        run(&mut client, &mut conn, &timer_service).await?;
         Ok::<(), anyhow::Error>(())
     })
     .unwrap();
@@ -99,7 +86,7 @@ async fn run(
             info!("MQTT Listening for messages");
 
             while let Ok(event) = connection.next().await {
-                handle_event(event.payload(), context.clone()).await?;
+                handle_event(&mut first_timer, event.payload(), context.clone()).await?;
             }
 
             info!("Connection closed");
