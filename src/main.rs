@@ -50,55 +50,57 @@ const TOPICS: [&str; 4] = [
     "/charging-controller/start-trip",
 ];
 
-fn main() -> Result<()> {
-    esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
+fn main() {
+    {
+        esp_idf_svc::sys::link_patches();
+        esp_idf_svc::log::EspLogger::initialize_default();
 
-    let timer_service = EspTimerService::new()?;
+        let timer_service = EspTimerService::new().unwrap();
 
-    let peripherals = Peripherals::take()?;
+        let peripherals = Peripherals::take().unwrap();
 
-    let i2c_master = i2c_master_init(
-        peripherals.i2c0,
-        peripherals.pins.gpio21.into(),
-        peripherals.pins.gpio22.into(),
-        100000.into(),
-    )?;
+        let i2c_master = i2c_master_init(
+            peripherals.i2c0,
+            peripherals.pins.gpio21.into(),
+            peripherals.pins.gpio22.into(),
+            100000.into(),
+        )
+        .unwrap();
 
-    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
+        let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
 
-    esp_idf_svc::hal::task::block_on(async {
-        let _wifi = wifi_create()?;
-        info!("Wifi created");
+        esp_idf_svc::hal::task::block_on(async {
+            let _wifi = wifi_create()?;
+            info!("Wifi created");
 
-        let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
-        info!("MQTT client created");
+            let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
+            info!("MQTT client created");
 
-        let mut i2c_devices = I2CDevices::new(&shared_bus.acquire_i2c()).unwrap();
+            //let mut i2c_devices = I2CDevices::new(&shared_bus.acquire_i2c()).unwrap();
 
-        let hardware_controller = HardwareController {
-            tpl_potentiometer: i2c_devices.tpl_potentiometer.clone(),
-        };
+            //let hardware_controller = HardwareController {
+            //    tpl_potentiometer: i2c_devices.tpl_potentiometer.clone(),
+            //};
 
-        run(&mut client, &mut conn, &timer_service, hardware_controller).await?;
-        Ok::<(), anyhow::Error>(())
-    })
-    .unwrap();
-    Ok(())
+            run(&mut client, &mut conn, &timer_service).await?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .unwrap()
+    }
 }
 
 async fn run(
     client: &mut EspAsyncMqttClient,
     connection: &mut EspAsyncMqttConnection,
     timer_service: &EspTimerService<Task>,
-    hardware_controller: HardwareController<'_>,
+    //hardware_controller: HardwareController<'_>,
 ) -> Result<()> {
     info!("About to start the MQTT client");
 
     let mut first_timer = timer_service.timer_async()?;
     let mut second_timer = timer_service.timer_async()?;
 
-    let context = initialize_context(hardware_controller)?;
+    let context = initialize_context()?;
 
     let res = select(
         // Need to immediately start pumping the connection for messages, or else subscribe() and publish() below will not work
@@ -207,11 +209,10 @@ fn wifi_create() -> Result<EspWifi<'static>, EspError> {
     Ok(esp_wifi)
 }
 
-fn initialize_context(hardware_controller: HardwareController) -> Result<Context> {
+fn initialize_context() -> Result<Context> {
     let context = Context {
         charging_controller_mutex: Arc::new(Mutex::new(ChargingController::new())),
         car_rwlock: Arc::new(RwLock::new(Car::new(3700, 0, 100)?)),
-        hardware_controller,
     };
     {
         let mut charging_controller = context.charging_controller_mutex.lock().unwrap();

@@ -5,8 +5,7 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct Context<'a> {
+pub struct Context {
     pub charging_controller_mutex: Arc<Mutex<ChargingController>>,
     pub car_rwlock: Arc<RwLock<Car>>,
-    pub hardware_controller: HardwareController<'a>,
 }
