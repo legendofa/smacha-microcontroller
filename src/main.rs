@@ -77,24 +77,7 @@ fn main() {
         let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
         info!("MQTT client created");
 
-        let mut timer = timer_service.timer_async()?;
-        for topic in ["/wall-plug/stats", "/solar-panel/stats"] {
-            while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
-                error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
-
-                // Re-try in 0.5s
-                timer.after(Duration::from_millis(500)).await.unwrap();
-
-                continue;
-            }
-        }
-
-        i2c_devices
-            .write_mqtt_messages(&mut timer, &mut client)
-            .await
-            .unwrap();
-
-        //run(&mut client, &mut conn, &timer_service).await?;
+        run(&mut client, &mut conn, &timer_service, &mut i2c_devices).await?;
         Ok::<(), anyhow::Error>(())
     })
     .unwrap();
@@ -104,6 +87,7 @@ async fn run(
     client: &mut EspAsyncMqttClient,
     connection: &mut EspAsyncMqttConnection,
     timer_service: &EspTimerService<Task>,
+    i2c_devices: &mut I2CDevices<'_>,
 ) -> Result<()> {
     info!("About to start the MQTT client");
 
@@ -147,24 +131,14 @@ async fn run(
                 }
             }
 
+            // Just to give a chance of our connection to get even the first published message
+            second_timer.after(Duration::from_millis(500)).await?;
+
             loop {
-                // Just to give a chance of our connection to get even the first published message
-                second_timer.after(Duration::from_millis(500)).await?;
-
-                let payload = "Hello from esp-mqtt-demo!";
-
-                /* loop {
-                    client
-                        .publish(MQTT_TOPIC, QoS::AtMostOnce, false, payload.as_bytes())
-                        .await?;
-
-                    info!("Published \"{payload}\" to topic");
-
-                    let sleep_secs = 2;
-
-                    info!("Now sleeping for {sleep_secs}s...");
-                    second_timer.after(Duration::from_secs(sleep_secs)).await?;
-                } */
+                i2c_devices
+                    .write_mqtt_messages(&mut second_timer, client)
+                    .await
+                    .unwrap();
             }
         }),
     )
