@@ -20,6 +20,9 @@ mod i2c;
 mod tpl_potentiometer;
 
 use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::i2c::I2cDriver;
+use esp_idf_svc::hal::modem::Modem;
+use esp_idf_svc::hal::peripheral::{Peripheral, PeripheralRef};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::mqtt::client::*;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
@@ -29,6 +32,7 @@ use esp_idf_svc::wifi::*;
 
 use anyhow::Result;
 use event_service::handle_event;
+use i2c::{i2c_master_init, I2CDevices};
 use log::*;
 
 const CHANNEL: u8 = 11;
@@ -52,14 +56,45 @@ fn main() {
 
     let timer_service = EspTimerService::new().unwrap();
 
+    let peripherals = Peripherals::take().unwrap();
+
+    let i2c_master = i2c_master_init(
+        peripherals.i2c0.into_ref(),
+        peripherals.pins.gpio21.into(),
+        peripherals.pins.gpio22.into(),
+        100000.into(),
+    )
+    .unwrap();
+
+    let shared_bus: &'static _ = shared_bus::new_std!(I2cDriver = i2c_master).unwrap();
+
     esp_idf_svc::hal::task::block_on(async {
-        let _wifi = wifi_create()?;
+        let _wifi = wifi_create(peripherals.modem.into_ref())?;
         info!("Wifi created");
+
+        let mut i2c_devices = I2CDevices::new(&shared_bus.acquire_i2c()).unwrap();
 
         let (mut client, mut conn) = mqtt_create(MQTT_URL, MQTT_CLIENT_ID)?;
         info!("MQTT client created");
 
-        run(&mut client, &mut conn, &timer_service).await?;
+        let mut timer = timer_service.timer_async()?;
+        for topic in ["/wall-plug/stats", "/solar-panel/stats"] {
+            while let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
+                error!("Failed to subscribe to topic \"{topic}\": {e}, retrying...");
+
+                // Re-try in 0.5s
+                timer.after(Duration::from_millis(500)).await.unwrap();
+
+                continue;
+            }
+        }
+
+        i2c_devices
+            .write_mqtt_messages(&mut timer, &mut client)
+            .await
+            .unwrap();
+
+        //run(&mut client, &mut conn, &timer_service).await?;
         Ok::<(), anyhow::Error>(())
     })
     .unwrap();
@@ -156,12 +191,11 @@ fn mqtt_create(
     Ok((mqtt_client, mqtt_conn))
 }
 
-fn wifi_create() -> Result<EspWifi<'static>, EspError> {
-    let peripherals = Peripherals::take()?;
+fn wifi_create(modem: PeripheralRef<'static, Modem>) -> Result<EspWifi<'static>, EspError> {
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut esp_wifi = EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?;
+    let mut esp_wifi = EspWifi::new(modem, sys_loop.clone(), Some(nvs))?;
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop)?;
 
     let wifi_configuration = Configuration::AccessPoint(AccessPointConfiguration {
